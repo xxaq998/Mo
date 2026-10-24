@@ -1,0 +1,1162 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>裂隙 · Rift (p5.js)</title>
+<script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; cursor: crosshair; }
+  canvas { display: block; }
+  .hint { position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%); text-align: center; pointer-events: none;
+          color: rgba(214, 236, 150, .55); font-family: "Songti SC", "STSong", "Noto Serif SC", serif; font-weight: 300;
+          letter-spacing: .8em; padding-left: .8em; font-size: 15px; transition: opacity 1.6s ease; }
+  .hint small { display: block; margin-top: 14px; font-family: Georgia, serif; font-style: italic; letter-spacing: .2em; font-size: 12px; color: rgba(214, 236, 150, .3); }
+  .hint i { display: block; width: 90px; height: 1px; margin: 0 auto 22px; background: linear-gradient(90deg, transparent, rgba(214, 250, 120, .9), transparent);
+            animation: seam 3.6s ease-in-out infinite; }
+  @keyframes seam { 0%, 100% { opacity: .15; transform: scaleX(.4) } 50% { opacity: 1; transform: scaleX(1) } }
+  .hint.gone { opacity: 0; }
+  /* a liquid-glass pill (../liquid-glass/liquid-glass.js). it fades with --lg-vis, never with opacity:
+     opacity < 1 on the button would cut the glass off from what's behind it */
+  #heal { position: fixed; right: 18px; bottom: max(18px, env(safe-area-inset-bottom)); background: none; border: 0; cursor: pointer;
+          padding: 11px 20px; color: rgba(250, 255, 232, .92); font: italic 13px Georgia, serif; letter-spacing: .2em;
+          text-shadow: 0 1px 8px rgba(20, 40, 0, .45);
+          --lg-vis: 0; transition: --lg-vis 1s ease, translate .2s ease-out, scale .2s ease-out; pointer-events: none; }
+  #heal.on { --lg-vis: 1; pointer-events: auto; }
+
+  /* === profile card — floats in the meadow, real liquid glass (liquid-glass.js) ===
+     it fades with --lg-vis, never opacity: opacity < 1 would cut the glass off from the meadow behind it */
+  /* pages: all stacked in the same place, only one shown at a time. a page scrolls on its own when its glass is taller
+     than the screen; it ignores the pointer (the meadow stays brushable around the glass) and touching the glass
+     scrolls it through the normal scroll chain */
+  #mo-cards { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+  .mo-page { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+             pointer-events: none; display: flex; flex-direction: column; align-items: center;
+             padding: calc(max(12px, env(safe-area-inset-top)) + 66px) 16px max(84px, calc(env(safe-area-inset-bottom) + 72px));
+             visibility: hidden; transition: visibility 0s linear 1s; }   /* pages not on screen are fully hidden, after their exit */
+  .mo-page.on { visibility: visible; transition-delay: 0s; }
+  .mo-page::-webkit-scrollbar { display: none; }
+  .mo-page::before, .mo-page::after { content: ''; flex: 1 0 0; }   /* centre the glass when it fits */
+  .mo-card { flex-shrink: 0; --lg-vis: 0; pointer-events: none;
+             transform: translateY(28px);
+             transition: --lg-vis .7s ease, transform .9s cubic-bezier(.2,.7,.2,1), translate .2s ease-out, scale .2s ease-out; }
+  .mo-card.up { transform: translateY(-28px); }
+  .mo-card.show { --lg-vis: 1; pointer-events: auto; transform: translateY(0);
+                touch-action: pan-y; }             /* body has touch-action:none for the tearing — allow scrolling on the cards */
+  .mo-card.lg-active { scale: var(--lg-sx,1) var(--lg-sy,1); }   /* cards shouldn't squish when touched */
+  #mo-profile, .mo-sec, #mo-price, .mo-links { width: min(400px, calc(100vw - 32px)); }
+
+  /* "swipe on" cue under each glass but the last */
+  .mo-more { flex-shrink: 0; margin-top: 20px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+             font: 11px "Songti SC","STSong","Noto Serif SC",serif; letter-spacing: .32em; padding-left: .32em;
+             color: rgba(255,255,240,.9); text-shadow: 0 1px 8px rgba(20,40,0,.55);
+             opacity: 0; transition: opacity .4s ease; pointer-events: none; }
+  .mo-more::after { content: ''; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+                    transform: rotate(45deg); animation: moBob 1.8s ease-in-out infinite; }
+  .mo-page.on .mo-more { opacity: 1; transition: opacity 1s ease 1.4s; }
+  @keyframes moBob { 0%, 100% { transform: translateY(-2px) rotate(45deg); opacity: .5; } 50% { transform: translateY(3px) rotate(45deg); opacity: 1; } }
+
+  /* top navigation: a glass pill, a lighter glass bead slides under the current tab */
+  #mo-nav { position: fixed; z-index: 7; top: max(12px, env(safe-area-inset-top)); left: 0; right: 0; margin: 0 auto;
+            width: fit-content; max-width: calc(100vw - 20px);
+            --lg-vis: 0; pointer-events: none; transform: translateY(-14px);
+            transition: --lg-vis .8s ease, transform .9s cubic-bezier(.2,.7,.2,1); }
+  #mo-nav.on { --lg-vis: 1; pointer-events: auto; transform: none; }
+  .nav-track { position: relative; display: flex; padding: 5px; overflow-x: auto; scrollbar-width: none; }
+  .nav-track::-webkit-scrollbar { display: none; }
+  #mo-nav button { all: unset; position: relative; z-index: 1; flex-shrink: 0; cursor: pointer; white-space: nowrap;
+                   padding: 8px 8px 8px calc(8px + .14em); border-radius: 999px;
+                   font: 13px "Songti SC","STSong","Noto Serif SC",serif; letter-spacing: .14em;
+                   color: rgba(0,0,0,.5); transition: color .35s ease; -webkit-tap-highlight-color: transparent; }
+  #mo-nav button[aria-current="page"] { color: #000; font-weight: 600; }
+  #mo-nav button:focus-visible { outline: 1px dashed rgba(0,0,0,.4); outline-offset: -3px; }
+  .nav-ink { position: absolute; z-index: 0; top: 5px; bottom: 5px; left: 0; width: 0; border-radius: 999px;
+             background: rgba(255,255,255,.6); box-shadow: 0 2px 10px rgba(0,0,0,.08), inset 0 0 0 1px rgba(255,255,255,.8);
+             transition: transform .55s cubic-bezier(.3,1.25,.5,1), width .55s cubic-bezier(.3,1.25,.5,1); }
+  @media (max-width: 350px) { #mo-nav button { font-size: 12px; padding: 7px 6px 7px calc(6px + .14em); } }
+  .mop-inner, .moa-inner { font-family: "Songti SC","STSong","Noto Serif SC",serif; color: #000; }
+
+  /* --- profile card --- */
+  .mop-inner { padding: 30px 28px 26px; text-align: center; }
+  .mop-quote { margin: 0; font-size: 18px; font-weight: 400;
+               letter-spacing: .2em; line-height: 2; color: #000; }
+  .mop-rule { display: block; width: 40px; height: 1px; margin: 14px auto;
+              background: linear-gradient(90deg,transparent,rgba(0,0,0,.4),transparent); }
+  .mop-sub { margin: 0 0 22px; font-size: 12.5px; letter-spacing: .16em; color: rgba(0,0,0,.6); }
+  .mop-tags { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin-bottom: 22px; }
+  .mop-tag { padding: 4px 13px; background: rgba(255,255,255,.3); border: 1px solid rgba(255,255,255,.55);
+             border-radius: 999px; font-size: 12px; letter-spacing: .1em; color: rgba(0,0,0,.8); }
+  .mop-tag.name { font-weight: 600; color: #000; }
+  .mop-footer { margin: 0; font-size: 12px; letter-spacing: .16em; line-height: 2; color: rgba(0,0,0,.55); }
+
+  /* --- about card: one section template, used five times ---
+     header (number · title · aside) → key/value rows → chip groups → prose → quote */
+  .moa-inner { padding: 26px 26px 28px; text-align: left; }
+  .ab-sec { padding: 26px 0 0; margin-top: 26px;
+            background: linear-gradient(90deg, transparent, rgba(0,0,0,.16) 30%, rgba(0,0,0,.16) 70%, transparent) top / 100% 1px no-repeat; }
+  .ab-sec:first-child { padding-top: 0; margin-top: 0; background: none; }
+  .ab-head { position: relative; display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+  .ab-no { font: italic 12px Georgia, serif; color: rgba(0,0,0,.38); letter-spacing: .06em; }
+  /* section numbers become large, faint numerals sitting behind the heading */
+  .ab-sec .ab-no { position: absolute; right: -4px; top: -20px; z-index: 0; pointer-events: none;
+                   font: italic 300 54px/1 Georgia, serif; letter-spacing: -.02em; color: rgba(0,0,0,.07); }
+  .ab-head > :not(.ab-no) { position: relative; z-index: 1; }
+  .ab-title { font-size: 16px; font-weight: 600; letter-spacing: .22em; color: #000; }
+  .ab-aside { margin-left: auto; font-size: 11px; letter-spacing: .12em; color: rgba(0,0,0,.45); }
+
+  .ab-kv { display: grid; grid-template-columns: 4.2em 1fr; gap: 9px 14px; margin: 0; font-size: 13px; line-height: 1.7; }
+  .ab-kv dt { color: rgba(0,0,0,.48); font-size: 12px; letter-spacing: .08em; padding-top: 1px; }
+  .ab-kv dd { margin: 0; color: rgba(0,0,0,.88); }
+  .ab-kv + .ab-kv, .ab-kv + .ab-p, .ab-p + .ab-kv, .ab-kv + .ab-quote, .ab-tl + .ab-kv { margin-top: 14px; }
+
+  .ab-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ab-chip { padding: 2px 10px; background: rgba(255,255,255,.32); border: 1px solid rgba(255,255,255,.55);
+             border-radius: 999px; font-size: 12px; line-height: 1.7; color: rgba(0,0,0,.8); white-space: nowrap; }
+
+  .ab-p { margin: 12px 0 0; font-size: 13px; line-height: 1.95; letter-spacing: .03em; color: rgba(0,0,0,.76);
+          text-align: justify; }
+  .ab-p b { font-weight: 600; color: #000; }
+  .ab-p.small { font-size: 11.5px; color: rgba(0,0,0,.5); }
+  .ab-sign { margin: 10px 0 0; text-align: right; font-size: 12px; letter-spacing: .14em; color: rgba(0,0,0,.5); }
+
+  .ab-quote { position: relative; margin: 18px 0 0; padding: 16px 18px 16px 24px; overflow: hidden;
+              background: linear-gradient(100deg, rgba(255,255,255,.42), rgba(255,255,255,.14));
+              border: 1px solid rgba(255,255,255,.55); border-radius: 14px;
+              text-align: left; font-size: 13px; line-height: 2.1; letter-spacing: .08em; color: rgba(0,0,0,.82); }
+  /* a seam of light down the left edge, breathing slowly */
+  .ab-quote::before { content: ''; position: absolute; left: 10px; top: 16px; bottom: 16px; width: 2px; border-radius: 2px;
+                      background: linear-gradient(180deg, transparent, #fff 22%, #fff 78%, transparent);
+                      box-shadow: 0 0 10px 2px rgba(255,255,255,.75); animation: qGlow 4.8s ease-in-out infinite; }
+  .ab-quote::after { content: '\201D'; position: absolute; right: 12px; bottom: -22px; pointer-events: none;
+                     font: italic 72px/1 Georgia, serif; color: rgba(0,0,0,.06); }
+  @keyframes qGlow { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+  .ab-quote b { display: block; margin-top: 8px; font-weight: 600; letter-spacing: .3em; color: #000; }
+
+  /* the soft gate before the heavier sections */
+  .ab-gate { display: flex; align-items: center; gap: 12px; margin: 26px 0 0;
+             font-size: 11px; letter-spacing: .22em; color: rgba(0,0,0,.45); white-space: nowrap; }
+  .ab-gate::before, .ab-gate::after { content: ''; flex: 1; height: 1px;
+    background: repeating-linear-gradient(90deg, rgba(0,0,0,.25) 0 3px, transparent 3px 7px); }
+
+  /* timeline: year column | a rule with a dot per event | the event */
+  .ab-tl { margin: 0; }
+  .ab-tl-i { display: grid; grid-template-columns: 3.4em 1fr; column-gap: 12px; }
+  .ab-tl-y { text-align: right; font: 13px Georgia, serif; font-variant-numeric: tabular-nums;
+             color: #000; line-height: 1.7; letter-spacing: .04em; }
+  .ab-tl-y.zh { font-family: inherit; font-size: 12.5px; }
+  .ab-tl-c { position: relative; padding: 0 0 18px 16px; border-left: 1px solid rgba(0,0,0,.18); }
+  .ab-tl-i:last-child .ab-tl-c { padding-bottom: 2px; border-left-color: transparent; }
+  .ab-tl-c::before { content: ''; position: absolute; left: -4px; top: 7px; width: 7px; height: 7px; border-radius: 50%;
+                     background: #000; box-shadow: 0 0 0 3px rgba(255,255,255,.55); }
+  .ab-tl-c p { margin: 0; font-size: 13px; line-height: 1.7; color: rgba(0,0,0,.88); }
+  .ab-tl-c p + p { margin-top: 4px; }
+  .ab-tl-c small { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.7; color: rgba(0,0,0,.52); }
+
+  /* --- pricing --- */
+  /* content reveal: each block surfaces out of a soft blur, one after another, as it scrolls into view */
+  .rv { opacity: 0; transform: translateY(12px); filter: blur(6px);
+        transition: opacity .9s cubic-bezier(.2,.7,.2,1), transform 1.1s cubic-bezier(.2,.7,.2,1), filter .9s ease;
+        transition-delay: var(--d, 0s); }
+  .rv.in { opacity: 1; transform: none; filter: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .rv { transform: none; filter: none; transition: opacity .4s ease; }
+    .ab-quote::before { animation: none; }
+  }
+
+  .ab-price { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 16px; }
+  .ab-price div { padding: 12px 10px; text-align: center; border-radius: 14px;
+                  background: rgba(255,255,255,.3); border: 1px solid rgba(255,255,255,.55); }
+  .ab-price small { display: block; font-size: 11.5px; letter-spacing: .12em; color: rgba(0,0,0,.5); }
+  .ab-price strong { display: block; margin-top: 4px; font: 400 26px Georgia, serif; color: #000; letter-spacing: .02em; }
+  .ab-chip.plain { background: none; border-color: transparent; color: rgba(0,0,0,.5); padding-left: 2px; }
+
+  .ab-sub { margin: 22px 0 8px; font-size: 12.5px; font-weight: 600; letter-spacing: .2em; color: rgba(0,0,0,.7); }
+  .ab-rows { list-style: none; margin: 0; padding: 0; }
+  .ab-rows li { display: flex; align-items: baseline; gap: 12px; padding: 7px 0;
+                border-bottom: 1px solid rgba(0,0,0,.07); font-size: 13px; line-height: 1.6; color: rgba(0,0,0,.8); }
+  .ab-rows li:last-child { border-bottom: 0; }
+  .ab-rows em { margin-left: auto; font-style: normal; text-align: right; color: #000; white-space: nowrap; }
+
+  .ab-thanks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 22px; }
+  .ab-thanks div { padding: 10px; text-align: center; border-radius: 12px; font-size: 14px; color: #000;
+                   background: rgba(255,255,255,.3); border: 1px solid rgba(255,255,255,.55); }
+  .ab-thanks small { display: block; margin-bottom: 2px; font-size: 11px; letter-spacing: .14em; color: rgba(0,0,0,.5); }
+
+  /* --- document links: a tighter stack of small glass rows --- */
+  .mo-links { flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
+  .mo-link { display: flex; align-items: baseline; gap: 10px; padding: 17px 22px; text-decoration: none; color: #000;
+             font-family: "Songti SC","STSong","Noto Serif SC",serif; -webkit-tap-highlight-color: transparent; }
+  .mo-link .lk-t { font-size: 14px; letter-spacing: .12em; }
+  .mo-link .lk-s { margin-left: auto; font-size: 11px; letter-spacing: .1em; color: rgba(0,0,0,.42); }
+  .mo-link .lk-a { font-size: 13px; color: rgba(0,0,0,.6); }
+  /* a flex glass gets its content wrapper as display:contents, which drops the wrapper's z-index and opacity:
+     the text must lift itself above the glass layers, and fade on its own */
+  .mo-link :is(.ab-no, .lk-t, .lk-s, .lk-a) { position: relative; z-index: 1;
+                                              opacity: 0; transition: opacity .4s ease, transform .2s ease; }
+  .mo-link.show :is(.ab-no, .lk-t, .lk-s, .lk-a) { opacity: 1; transition: opacity .8s ease .35s, transform .2s ease; }
+  .mo-link:hover .lk-a { transform: translate(2px,-2px); }
+</style>
+</head>
+<body>
+<div class="hint" id="hint"><i></i>轻轻划开<small>swipe to tear the dark</small></div>
+<audio id="bgm" src="1.mp3" loop preload="auto"></audio>
+<button id="heal" data-liquid-glass='{"radius": 999, "elasticity": 0.2, "blur": 1}'>close the rift</button>
+
+<!-- top navigation: one tab per page -->
+<nav id="mo-nav" aria-label="页面导航" aria-hidden="true" data-liquid-glass='{"radius": 999, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+  <div class="nav-track">
+    <span class="nav-ink" aria-hidden="true"></span>
+    <button type="button">简介</button><button type="button">关于</button><button type="button">履历</button><button type="button">往昔</button><button type="button">现状</button><button type="button">价格</button><button type="button">更多</button>
+  </div>
+</nav>
+
+<!-- the meadow pages: appear when the meadow covers the screen, one glass at a time -->
+<div id="mo-cards">
+<div class="mo-page">
+<div id="mo-profile" class="mo-card" aria-hidden="true" data-liquid-glass='{"radius": 20, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+  <div class="mop-inner">
+    <p class="mop-quote">你好 陌生人<br>祝好&emsp;不顾一切的好</p>
+    <span class="mop-rule"></span>
+    <p class="mop-sub">时间 塑造我们会成为勇敢有力量的人</p>
+    <div class="mop-tags">
+      <span class="mop-tag name">漠</span>
+      <span class="mop-tag">29 岁</span>
+      <span class="mop-tag">高阶 ENTJ</span>
+      <span class="mop-tag">INFP</span>
+      <span class="mop-tag">风象天秤</span>
+      <span class="mop-tag">直女</span>
+    </div>
+    <p class="mop-footer">高度同理&emsp;高度共情<br>以倾听者身份&emsp;温和理性陪伴</p>
+  </div>
+</div>
+</div>
+
+<div class="mo-page">
+<div class="mo-card mo-sec" aria-hidden="true" data-liquid-glass='{"radius": 20, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+  <div class="moa-inner">
+    <section class="ab-sec">
+      <div class="ab-head"><span class="ab-no">01</span><span class="ab-title">关于 漠</span><span class="ab-aside">绝对了解我后 可放心倾诉</span></div>
+      <dl class="ab-kv">
+        <dt>建模</dt><dd>耳坠号 · 魔法季不断 · 空间斗篷都有</dd>
+        <dt>人格</dt><dd>高阶 ENTJ / INFP</dd>
+      </dl>
+    </section>
+
+    <section class="ab-sec">
+      <div class="ab-head"><span class="ab-no">02</span><span class="ab-title">性格底色</span></div>
+      <dl class="ab-kv">
+        <dt>自设 OC</dt><dd class="ab-chips"><span class="ab-chip">蛇</span><span class="ab-chip">狐狸</span><span class="ab-chip">蝴蝶</span><span class="ab-chip">兔子</span><span class="ab-chip">黑猫</span></dd>
+        <dt>常驻性格</dt><dd class="ab-chips"><span class="ab-chip">热情直球</span><span class="ab-chip">温柔善变</span><span class="ab-chip">理智淡漠</span></dd>
+        <dt>擅长</dt><dd class="ab-chips"><span class="ab-chip">现实</span><span class="ab-chip">心理</span><span class="ab-chip">焦虑</span><span class="ab-chip">感情</span><span class="ab-chip">友谊</span><span class="ab-chip">陪玩</span></dd>
+      </dl>
+      <p class="ab-p">因人而异 在于以什么样的面具来接触 让你相处更舒适。随着树洞问题探讨的加深 会逐渐显露<b>真实的漠</b>与你对话。</p>
+      <p class="ab-p">根据访客踏入的不同课题 会无形中轻松安排能快速解决困惑和自我重塑的心局 让你亲自来突破难关。阅历方面绝对丰富 什么样的人 不论男女都遇到过 都能控住话题和场面；三观方面各种人群都能包容 并衍生深入沟通 接得住任何负面情绪。</p>
+      <div class="ab-quote">
+        我靠近你 是希望你越来越好<br>
+        如果拉扯我堕落 我也会陪你走入深渊里<br>
+        找到最真实的你 并抱住你
+        <b>不外传 · 不讨论 · 只偏向你</b>
+      </div>
+    </section>
+  </div>
+</div>
+</div>
+
+<div class="mo-page">
+<div class="mo-card mo-sec" aria-hidden="true" data-liquid-glass='{"radius": 20, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+  <div class="moa-inner">
+    <section class="ab-sec">
+      <div class="ab-head"><span class="ab-no">03</span><span class="ab-title">履历 · 工作</span></div>
+      <dl class="ab-kv">
+        <dt>目前就职</dt><dd>零售行业店长</dd>
+        <dt>副业</dt><dd>朋友公司销售项目负责人</dd>
+        <dt>主职</dt><dd class="ab-chips"><span class="ab-chip">餐饮行业经理</span><span class="ab-chip">婚庆主持人</span><span class="ab-chip">酒店客房主管</span><span class="ab-chip">棋牌室合作人</span><span class="ab-chip">零售行业店长</span><span class="ab-chip">全职陪玩</span></dd>
+        <dt>兼职实习</dt><dd class="ab-chips"><span class="ab-chip">写小说</span><span class="ab-chip">网文编辑</span><span class="ab-chip">发传单</span><span class="ab-chip">奶茶服务员</span><span class="ab-chip">咖啡服务员</span><span class="ab-chip">电竞公司客服</span><span class="ab-chip">静吧调酒师</span><span class="ab-chip">电台主播</span><span class="ab-chip">游戏主播</span><span class="ab-chip">王者指挥官</span><span class="ab-chip">酒店前台接待</span><span class="ab-chip">茶室接待员</span></dd>
+      </dl>
+      <p class="ab-p small">面试经验更多 忽略不纳入统计范围内</p>
+      <p class="ab-p">深耕在服务行业——写文服务读者情绪 打工服务人民需求 餐饮服务顾客口味 陪玩服务板位心情。</p>
+      <p class="ab-sign">—— 平庸之人 碌碌无为的工作记录</p>
+    </section>
+    <div class="ab-gate">后面内容偏负面 可跳过不看</div>
+  </div>
+</div>
+</div>
+
+<div class="mo-page">
+<div class="mo-card mo-sec" aria-hidden="true" data-liquid-glass='{"radius": 20, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+  <div class="moa-inner">
+    <section class="ab-sec">
+      <div class="ab-head"><span class="ab-no">04</span><span class="ab-title">往昔经历</span></div>
+      <div class="ab-tl">
+        <div class="ab-tl-i"><div class="ab-tl-y">2018</div><div class="ab-tl-c">
+          <p>常驻网络心理 / 情感咨询平台 担任咨询师</p>
+          <p>同年开办网络电台 随缘渡人渡己</p>
+          <small>电台开播两年 收益 8w+ 已全额反馈听众和捐款</small>
+        </div></div>
+        <div class="ab-tl-i"><div class="ab-tl-y">2019</div><div class="ab-tl-c">
+          <p>担任当地公益救援队队员</p>
+          <small>入职 3 个月 因救自杀者无果 陷入迷茫期 自主退队 优先治愈自己</small>
+        </div></div>
+        <div class="ab-tl-i"><div class="ab-tl-y">2020</div><div class="ab-tl-c">
+          <p>进陪玩圈 为小团策划</p>
+        </div></div>
+        <div class="ab-tl-i"><div class="ab-tl-y zh">目前</div><div class="ab-tl-c">
+          <p>入驻与松果心理倾诉 做实习咨询师</p>
+        </div></div>
+      </div>
+      <dl class="ab-kv">
+        <dt>接触个案</dt><dd class="ab-chips"><span class="ab-chip">家庭乱伦</span><span class="ab-chip">虐杀动物</span><span class="ab-chip">各类自杀</span><span class="ab-chip">计划报复</span><span class="ab-chip">青春期生长痛</span><span class="ab-chip">小圈黑暗面</span><span class="ab-chip">自我意识丧失</span><span class="ab-chip">双相情感障碍</span><span class="ab-chip">精神分裂</span><span class="ab-chip">解离症</span><span class="ab-chip">多重人格交叉对话</span><span class="ab-chip">躁郁症</span><span class="ab-chip">严重焦虑倾向</span></dd>
+      </dl>
+      <p class="ab-p small">太多人路过我的生命 记不清了</p>
+      <p class="ab-p">已有效治愈；明显抑郁患者交接给当地家长和医生介入；报复心理有效劝阻 当事人目前已就职某公司担任董事。后期回访 <b>98% 步入生活正规 个案无死亡史</b>。</p>
+      <dl class="ab-kv">
+        <dt>感情现状</dt><dd>无婚姻 无暧昧 无心选 无同居史<br><span style="color:rgba(0,0,0,.5);font-size:12px">不吃树洞暧昧票 从陌生到朋友身份 忠于你</span></dd>
+      </dl>
+    </section>
+  </div>
+</div>
+</div>
+
+<div class="mo-page">
+<div class="mo-card mo-sec" aria-hidden="true" data-liquid-glass='{"radius": 20, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+  <div class="moa-inner">
+    <section class="ab-sec">
+      <div class="ab-head"><span class="ab-no">05</span><span class="ab-title">现状 · 心理</span></div>
+      <dl class="ab-kv">
+        <dt>2024</dt><dd>确诊中度抑郁倾向 / 中重度焦虑 / 人际关系敏感</dd>
+        <dt>现在</dt><dd>基本已状态稳定 进入断药期</dd>
+        <dt>躯体化</dt><dd class="ab-chips"><span class="ab-chip">严重焦虑</span><span class="ab-chip">易怒</span><span class="ab-chip">心悸</span><span class="ab-chip">药返</span><span class="ab-chip">手抖</span><span class="ab-chip">记忆断层</span><span class="ab-chip">无理由情绪崩</span><span class="ab-chip">泪失禁</span></dd>
+      </dl>
+      <p class="ab-p">所以我绝不会轻飘飘地去评论「这只是抑郁症」「是装病」这一类不看重心理疾病的发言。我与你身同感受 我会握紧任何求助的手 告诉你如何自愈 怎么调解情绪。</p>
+      <div class="ab-quote">
+        你看啊 这每一步坑洼的泥地<br>
+        我踩下脚印 替你走过
+        <b>请放心把情绪交给我梳理</b>
+      </div>
+    </section>
+  </div>
+</div>
+</div>
+
+<!-- pricing -->
+<div class="mo-page">
+<div id="mo-price" class="mo-card" aria-hidden="true" data-liquid-glass='{"radius": 20, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+  <div class="moa-inner">
+    <section class="ab-sec">
+      <div class="ab-head"><span class="ab-no">06</span><span class="ab-title">关于价格</span><span class="ab-aside">树洞 ¥40 / 小时</span></div>
+      <div class="ab-price">
+        <div><small>树洞 · 一小时</small><strong>¥ 40</strong></div>
+        <div><small>半小时</small><strong>¥ 23</strong></div>
+      </div>
+      <dl class="ab-kv">
+        <dt>陪伴方式</dt><dd class="ab-chips"><span class="ab-chip">纯文</span><span class="ab-chip">上游戏</span><span class="ab-chip">带麦</span><span class="ab-chip plain">不加价</span></dd>
+      </dl>
+
+      <h4 class="ab-sub">加价项</h4>
+      <ul class="ab-rows">
+        <li><span>卡装扮</span><em>+3</em></li>
+        <li><span>心理相关</span><em>+5</em></li>
+        <li><span>旁观</span><em>+8</em></li>
+        <li><span>替身性格</span><em>+10</em></li>
+        <li><span>基础玄学咨询</span><em>+20</em></li>
+        <li><span>一陪多</span><em>按人数收 50% 单价</em></li>
+        <li><span>夜间 12–3 点</span><em>凌晨价 +5</em></li>
+        <li><span>凌晨 3–6 点</span><em>凌晨价 +7</em></li>
+      </ul>
+      <p class="ab-p small">提升认知、教学向的树洞课程会另外协商收费</p>
+
+      <h4 class="ab-sub">特殊情况</h4>
+      <ul class="ab-rows">
+        <li><span>紧急实时陪护</span><em>双倍价</em></li>
+        <li><span>介入危险行为 / 代理报警</span><em>¥200 / 小时</em></li>
+        <li><span>陪同救赎他人 / 代呼救护车</span><em>免费</em></li>
+        <li><span>劝阻攻击行为 / 陪同受骂</span><em>以实际情况为准</em></li>
+      </ul>
+      <p class="ab-p small">代理报警通常要接受笔录、待在派出所等待结果，时长 3–6 小时不等。更推荐自己去报警——亲手经历，方有成长痕迹。如浪费救护车资源，医院会加收 100 元以上费用。</p>
+
+      <h4 class="ab-sub">代咨询业务</h4>
+      <ul class="ab-rows">
+        <li><span>代心理咨询</span><em>¥120 / 小时</em></li>
+        <li><span>代法务咨询</span><em>¥150 / 小时</em></li>
+      </ul>
+      <p class="ab-p small">仅为常规问题报价，复杂类会协商额外费用。与固定的心理咨询师 / 律师保持合作关系。</p>
+
+      <div class="ab-thanks">
+        <div><small>合作心理咨询师</small>云念</div>
+        <div><small>合作法务律师</small>李法棍</div>
+      </div>
+      <p class="ab-sign" style="text-align:center">由衷感谢</p>
+    </section>
+  </div>
+</div>
+</div>
+
+<!-- documents -->
+<div class="mo-page">
+<div class="mo-links">
+  <a class="mo-card mo-link" aria-hidden="true" href="https://www.kdocs.cn/l/cnujFdksqCm8" target="_blank" rel="noopener" data-liquid-glass='{"radius": 16, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+    <span class="ab-no">07</span><span class="lk-t">关于心理相关证书</span><span class="lk-s">金山文档</span><span class="lk-a" aria-hidden="true">↗</span></a>
+  <a class="mo-card mo-link" aria-hidden="true" href="https://www.kdocs.cn/l/codoLAVuZlKs" target="_blank" rel="noopener" data-liquid-glass='{"radius": 16, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+    <span class="ab-no">08</span><span class="lk-t">关于好友位的认可</span><span class="lk-s">金山文档</span><span class="lk-a" aria-hidden="true">↗</span></a>
+  <a class="mo-card mo-link" aria-hidden="true" href="https://www.kdocs.cn/l/cn0k3P11qoRo" target="_blank" rel="noopener" data-liquid-glass='{"radius": 16, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+    <span class="ab-no">09</span><span class="lk-t">关于「她们」的留言</span><span class="lk-s">金山文档</span><span class="lk-a" aria-hidden="true">↗</span></a>
+  <a class="mo-card mo-link" aria-hidden="true" href="https://www.kdocs.cn/l/cieHN5YDBQVh" target="_blank" rel="noopener" data-liquid-glass='{"radius": 16, "blur": 8, "saturation": 140, "elasticity": 0.05}'>
+    <span class="ab-no">10</span><span class="lk-t">塔罗是一面镜子</span><span class="lk-s">金山文档</span><span class="lk-a" aria-hidden="true">↗</span></a>
+</div>
+</div>
+</div>
+
+<script src="../liquid-glass/liquid-glass.js"></script>
+
+<script>
+/* ============================================================
+   Rift — p5.js
+   a dark cloth; a swipe tears it open onto warm cream paper,
+   grass sprouts in the opening, fills it, then spreads until it carpets the whole screen,
+   small flowers bloom in it, and yellow butterflies come out of the crack
+   ============================================================ */
+let scene, world, velvet, dark, spill, W, H, PAD;
+const SPILL = 4;   // light spill and dapples are worked out at quarter resolution, which also softens them
+const cracks = [], flies = [], pending = [];
+let cur = null, healT = 0, pressT = 0, spillLevel = 0;
+const R = Math.random, rr = (a, b) => a + R() * (b - a);
+const gauss = () => (R() + R() + R() + R() - 2) * .8;
+const now = () => millis() / 1000;
+const smooth = q => (q = Math.min(1, Math.max(0, q)), q * q * (3 - 2 * q));
+
+function setup() {
+  pixelDensity(Math.min(2, window.devicePixelRatio || 1));
+  createCanvas(windowWidth, windowHeight);
+  initGL();
+  build();
+}
+function windowResized() { resizeCanvas(windowWidth, windowHeight); build(); }
+function build() {
+  W = width; H = height; PAD = Math.round(Math.max(W, H) * .04);
+  scene = createGraphics(W + PAD * 2, H + PAD * 2); paintScene(scene);
+  world = createGraphics(W, H); world.pixelDensity(1);
+  velvet = createGraphics(W, H); paintVelvet(velvet);
+  dark = createGraphics(W, H);
+  const q = () => { const c = document.createElement('canvas'); c.width = Math.ceil(W / SPILL); c.height = Math.ceil(H / SPILL); return c; };
+  spill = q();
+  buildMeadow();
+}
+
+/* ============================================================
+   the world behind: warm cream paper, softly mottled, with a faint tooth
+   ============================================================ */
+function paintScene(g) {
+  const w = g.width, h = g.height, ctx = g.drawingContext, k = 4, sw = Math.ceil(w / k), sh = Math.ceil(h / k);
+  const c = document.createElement('canvas'); c.width = sw; c.height = sh;
+  const cx = c.getContext('2d'), img = cx.createImageData(sw, sh), d = img.data;
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+    const X = x * k, Y = y * k, i = (y * sw + x) * 4;
+    const t = (noise(X * .003 + 70, Y * .003) * .7 + noise(X * .011 + 90, Y * .011) * .3 - .5) * 2, lift = .5 - y / sh;
+    d[i] = 244 + t * 6 + lift * 6; d[i + 1] = 237 + t * 7 + lift * 6; d[i + 2] = 221 + t * 9 + lift * 8; d[i + 3] = 255;
+  }
+  cx.putImageData(img, 0, 0);
+  ctx.imageSmoothingQuality = 'high'; ctx.drawImage(c, 0, 0, w, h);
+  g.strokeWeight(1);
+  for (let n = 0; n < w * h / 50; n++) { if (R() < .5) g.stroke(255, 255, 250, 12); else g.stroke(150, 120, 80, 9); g.point(R() * w, R() * h); }
+}
+
+/* ============================================================
+   the meadow — painted like the reference: a green ground of broad, slowly drifting light and dark patches,
+   hatched with thousands of short pale strokes that all lean the same way.
+   it is live (WebGL): gusts roll across and turn the strokes, a finger combs them flat and they spring back.
+   it sprouts inside the opening first, then spreads until the screen is carpeted; soft little flowers open in it.
+   ============================================================ */
+let gl = null, glc, progG, progH, progB, vaoG, vaoH, vaoB, bufG, bufH, texField, texCells, nGrass = 0, nHeads = 0;
+let S = 1, PD = 1, CELL = 9, GW = 0, GH = 0, FC = 8, FW = 0, FH = 0, FD, FV, FU, fieldLive = 0;
+let cellT, cellDone, queue = [], qi = 0, doneN = 0, lastAct = 0, wipeT = 0;
+const LEAN = -.55, SEG = 4;                                       // strokes lean up and to the right, as in the video
+const WIND = [Math.cos(LEAN), Math.sin(LEAN)];
+
+const GLSL_COMMON = `
+uniform vec2 uRes; uniform float uTime; uniform vec2 uWind; uniform float uWindStr;
+uniform sampler2D uField; uniform highp sampler2D uCells; uniform vec2 uGrid; uniform float uCell;
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }
+float cellTime(vec2 p){ ivec2 c = ivec2(clamp(floor(p / uCell), vec2(0.0), uGrid - 1.0)); return texelFetch(uCells, c, 0).r; }
+float gustAt(vec2 p){ vec2 q = p / 220.0 - uWind * uTime * 0.5; float g = vnoise(q) * 0.62 + vnoise(q * 2.1 + 7.3) * 0.38; return smoothstep(0.3, 0.85, g); }
+// how the wind and the finger push a stroke (screen plane), plus the gust value
+vec3 bendAt(vec2 root, float phase){
+  float g = gustAt(root);
+  vec2 q = root / 220.0 - uWind * uTime * 0.5;
+  float sway = (vnoise(q * 1.6 + 3.1) - 0.5) * 0.9 * (0.3 + g);
+  float flutter = sin(uTime * (3.0 + phase * 2.0) + phase * 37.0) * 0.06;
+  vec2 B = uWind * (g * 0.5 * uWindStr + flutter) + vec2(-uWind.y, uWind.x) * sway * uWindStr;
+  B += texture(uField, root / uRes).rg;
+  return vec3(B, g);
+}
+float growth(vec2 root, float phase){ float q = clamp((uTime - cellTime(root) - phase * 0.22) / 0.4, 0.0, 1.0); return 1.0 - pow(1.0 - q, 3.0); }
+vec4 toClip(vec2 P){ return vec4(P.x / uRes.x * 2.0 - 1.0, 1.0 - P.y / uRes.y * 2.0, 0.0, 1.0); }
+`;
+const VS_GRASS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aV; layout(location=1) in vec4 aA; layout(location=2) in vec4 aB;
+${GLSL_COMMON}
+out vec3 vCol; out float vA, vT, vSide;
+void main(){
+  vec2 root = aA.xy; float gr = growth(root, aB.x);
+  vec3 bg = bendAt(root, aB.x);
+  vec2 F = texture(uField, root / uRes).rg; float f = min(length(F), 1.4);
+  float base = ${LEAN.toFixed(3)} + aB.y;
+  vec2 dir = normalize(vec2(cos(base), sin(base)) + bg.xy * 1.6);
+  float L = aA.z * gr * (1.0 + 0.7 * f + 0.3 * bg.z * uWindStr);     // combed or wind-blown grass lies longer
+  vec2 n = vec2(-dir.y, dir.x);
+  float t = aV.x;
+  vec2 P = root + dir * L * t + n * (aV.y * aA.w * 0.5 * mix(1.0, 0.3, t) + sin(t * 3.1416) * L * aB.y * 0.25);
+  gl_Position = toClip(P);
+  int k = int(aB.w + 0.5);
+  vec3 c; float a;
+  if (k == 0) { c = vec3(0.94, 0.98, 0.78); a = 0.5; }            // pale highlight strokes
+  else if (k == 1) { c = vec3(0.72, 0.85, 0.36); a = 0.40; }       // light green
+  else { c = vec3(0.20, 0.33, 0.04); a = 0.30; }                   // deep green, for depth
+  float lit = bg.z * uWindStr * 0.6 + f * 0.5;                     // a gust or a finger turns the blades into the light
+  if (k < 2) a *= 0.8 + lit; else a *= 1.0 - 0.5 * lit;
+  c = mix(c, vec3(0.97, 0.99, 0.82), min(1.0, lit * 0.4) * step(float(k), 1.0));
+  vCol = c; vA = min(0.85, a) * smoothstep(0.0, 0.3, gr); vT = t; vSide = aV.y;
+}`;
+const FS_GRASS = `#version 300 es
+precision highp float;
+in vec3 vCol; in float vA, vT, vSide; out vec4 o;
+void main(){
+  float a = vA * smoothstep(0.0, 0.9, 1.0 - abs(vSide)) * smoothstep(0.0, 0.15, vT) * (1.0 - 0.6 * smoothstep(0.6, 1.0, vT));
+  o = vec4(vCol * a, a);
+}`;
+const VS_HEAD = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aV; layout(location=1) in vec4 aA; layout(location=2) in vec4 aB;
+${GLSL_COMMON}
+out vec2 vUv; flat out float vType;
+void main(){
+  vec2 root = aA.xy;
+  vec3 bg = bendAt(root, aB.x);
+  float q = clamp((uTime - cellTime(root) - 0.6 - aB.x * 0.8) / 0.6, 0.0, 1.0), u = q - 1.0;
+  float r = aA.w * (1.0 + 2.7 * u * u * u + 1.7 * u * u);          // opens after the grass, with a small overshoot
+  float rot = aB.y + bg.x * 0.3;
+  vec2 off = mat2(cos(rot), sin(rot), -sin(rot), cos(rot)) * aV * r;
+  gl_Position = toClip(root + bg.xy * aA.z + off);                  // nods with the wind and the finger
+  vUv = aV; vType = aB.w;
+}`;
+const FS_HEAD = `#version 300 es
+precision highp float;
+in vec2 vUv; flat in float vType; out vec4 o;
+void main(){
+  float r = length(vUv), an = atan(vUv.y, vUv.x);
+  int ty = int(vType + 0.5);
+  vec3 pc, cc;
+  if (ty == 0) { pc = vec3(1.00, 0.93, 0.62); cc = vec3(1.00, 0.98, 0.86); }        // goose yellow
+  else if (ty == 1) { pc = vec3(0.99, 0.78, 0.82); cc = vec3(1.00, 0.94, 0.72); }   // blush pink
+  else if (ty == 2) { pc = vec3(1.00, 0.98, 0.93); cc = vec3(0.99, 0.87, 0.50); }   // milk white
+  else if (ty == 3) { pc = vec3(0.84, 0.76, 0.97); cc = vec3(1.00, 0.95, 0.76); }   // pale violet
+  else { pc = vec3(0.74, 0.86, 0.99); cc = vec3(1.00, 0.96, 0.80); }                // pale blue
+  float edge = 0.62 + 0.38 * pow(abs(cos(an * 2.5)), 0.8);
+  float a = 1.0 - smoothstep(edge - 0.3, edge + 0.02, r);           // soft, like a dab of paint
+  if (a < 0.003) discard;
+  vec3 c = mix(cc, pc, smoothstep(0.08, 0.42, r));
+  a *= 0.92;
+  o = vec4(c * a, a);
+}`;
+const VS_GROUND = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aV;
+uniform vec2 uRes; out vec2 vP;
+void main(){ vP = vec2((aV.x + 1.0) * 0.5 * uRes.x, (1.0 - aV.y) * 0.5 * uRes.y); gl_Position = vec4(aV, 0.0, 1.0); }`;
+const FS_GROUND = `#version 300 es
+precision highp float;
+${GLSL_COMMON}
+in vec2 vP; out vec4 o;
+float cov(ivec2 c){ c = clamp(c, ivec2(0), ivec2(uGrid) - 1); return smoothstep(0.0, 0.5, uTime - texelFetch(uCells, c, 0).r); }
+void main(){
+  vec2 g = vP / uCell - 0.5; ivec2 i = ivec2(floor(g)); vec2 f = fract(g);
+  float a = mix(mix(cov(i), cov(i + ivec2(1, 0)), f.x), mix(cov(i + ivec2(0, 1)), cov(i + ivec2(1, 1)), f.x), f.y);
+  a = smoothstep(0.15, 0.85, a + (vnoise(vP * 0.08) - 0.5) * 0.3);
+  // broad soft patches of light and shade that drift very slowly, like the video
+  float n = vnoise(vP / 260.0 + vec2(uTime * 0.012, uTime * 0.008)) * 0.65 + vnoise(vP / 90.0 - uTime * 0.01) * 0.35;
+  vec3 c = mix(vec3(0.33, 0.49, 0.05), vec3(0.62, 0.80, 0.12), smoothstep(0.2, 0.75, n));
+  c += vec3(0.05, 0.05, 0.0) * gustAt(vP) * uWindStr;
+  o = vec4(c * a, a);
+}`;
+
+function compile(vs, fs) {
+  const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s)); return s; };
+  const p = gl.createProgram(); gl.attachShader(p, mk(gl.VERTEX_SHADER, vs)); gl.attachShader(p, mk(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+  p.u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const name = gl.getActiveUniform(p, i).name; p.u[name] = gl.getUniformLocation(p, name); }
+  return p;
+}
+function initGL() {
+  glc = document.createElement('canvas');
+  gl = glc.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, preserveDrawingBuffer: true });
+  if (!gl) { console.warn('WebGL2 unavailable — no grass'); return; }
+  progG = compile(VS_GRASS, FS_GRASS); progH = compile(VS_HEAD, FS_HEAD); progB = compile(VS_GROUND, FS_GROUND);
+  const strip = []; for (let i = 0; i <= SEG; i++) strip.push(i / SEG, -1, i / SEG, 1);
+  const geo = (arr) => { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW); return b; };
+  const gBlade = geo(strip), gQuad = geo([-1, -1, 1, -1, -1, 1, 1, 1]), gTri = geo([-1, -1, 3, -1, -1, 3]);
+  bufG = gl.createBuffer(); bufH = gl.createBuffer();
+  const vao = (g, inst) => {
+    const v = gl.createVertexArray(); gl.bindVertexArray(v);
+    gl.bindBuffer(gl.ARRAY_BUFFER, g); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    if (inst) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, inst);
+      [[1, 4, 0], [2, 4, 16]].forEach(([loc, n, off]) => {
+        gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, 32, off); gl.vertexAttribDivisor(loc, 1);
+      });
+    }
+    gl.bindVertexArray(null); return v;
+  };
+  vaoG = vao(gBlade, bufG); vaoH = vao(gQuad, bufH); vaoB = vao(gTri, null);
+  texField = gl.createTexture(); texCells = gl.createTexture();
+}
+// lay out every blade and flower once; they stay invisible (height 0) until their cell's time comes
+function buildMeadow() {
+  S = Math.min(W, H) / 430; PD = Math.min(2, pixelDensity());
+  CELL = Math.max(8, Math.round(9 * S));
+  GW = Math.ceil(W / CELL) + 1; GH = Math.ceil(H / CELL) + 1;
+  FW = Math.ceil(W / FC) + 1; FH = Math.ceil(H / FC) + 1;
+  FD = new Float32Array(FW * FH * 2); FV = new Float32Array(FW * FH * 2); FU = new Float32Array(FW * FH * 2);
+  if (!gl) return;
+  glc.width = Math.round(W * PD); glc.height = Math.round(H * PD);
+  // strokes: [x, y, length, width | phase, angle jitter, -, kind]
+  const nG = Math.min(160000, Math.round(W * H / 14)), nF = Math.round(W * H / 4200);
+  const G = new Float32Array(nG * 8), F = new Float32Array(nF * 8);
+  for (let k = 0; k < nG; k++) {
+    const x = rr(-6, W + 6), y = rr(-6, H + 10), q = R();
+    G.set([x, y, (6 + 7 * R()) * S, (1.1 + .6 * R()) * S,
+           R(), gauss() * .15 + (noise(x * .005, y * .005, 900) - .5) * .5, 0, q < .45 ? 0 : q < .8 ? 1 : 2], k * 8);
+  }
+  let f = 0;
+  for (let tries = 0; f < nF && tries < nF * 40; tries++) {
+    const x = R() * W, y = R() * H;
+    const p = smooth((noise(x * .004 + 99, y * .004, 700) - .42) * 4);   // flowers gather in loose drifts
+    if (R() > p * .9 + .03) continue;
+    const tn = noise(x * .003 + 50, y * .003, 1500), type = R() < .3 ? Math.floor(R() * 5) : Math.max(0, Math.min(4, Math.floor(tn * 6.5 - 1)));
+    F.set([x, y, 5 * S, (4.6 + 2.4 * R()) * S, R(), R() * TWO_PI, 0, type], f * 8); f++;
+  }
+  nGrass = nG; nHeads = f;
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufG); gl.bufferData(gl.ARRAY_BUFFER, G, gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufH); gl.bufferData(gl.ARRAY_BUFFER, F.subarray(0, f * 8), gl.STATIC_DRAW);
+  gl.bindTexture(gl.TEXTURE_2D, texField);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, FW, FH, 0, gl.RG, gl.FLOAT, FD);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  resetGrass();
+}
+function uploadCells() {
+  if (!gl) return;
+  const d = new Float32Array(cellT.length); for (let i = 0; i < d.length; i++) d[i] = cellT[i] === Infinity ? 1e9 : cellT[i];
+  gl.bindTexture(gl.TEXTURE_2D, texCells);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, GW, GH, 0, gl.RED, gl.FLOAT, d);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+}
+function resetGrass() {
+  cellT = new Float32Array(GW * GH).fill(Infinity); cellDone = new Uint8Array(GW * GH);
+  queue = []; qi = 0; doneN = 0; lastAct = 0; wipeT = 0;
+  FD.fill(0); FV.fill(0); fieldLive = 1;
+  uploadCells();
+}
+// when a tear is finished, every cell learns when its grass arrives:
+// cells inside the opening go first (fast, running along the tear), then the green spreads outward
+function seedGrass(c, T) {
+  const P = c.pts, L = Math.max(1, c.len), Wmax = Math.min(30, 6 + c.len * .055);
+  const g0 = T + .45, SPEED = Math.hypot(W, H) / 3.4;
+  for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+    const i = gy * GW + gx; if (cellDone[i]) continue;
+    const cx = (gx + .5) * CELL, cy = (gy + .5) * CELL;
+    let best = 1e18, bi = 0;
+    for (let j = 0; j < P.length; j += 2) { const dx = P[j].x - cx, dy = P[j].y - cy, d2 = dx * dx + dy * dy; if (d2 < best) { best = d2; bi = j; } }
+    const p = P[bi], d = Math.sqrt(best), u = p.s / L, w = Wmax * Math.pow(Math.sin(Math.PI * u), .8) * (p.wl + p.wr) / 2;
+    const t = d <= w + CELL * .5
+      ? g0 + u * .4 + R() * .3
+      : g0 + .8 + (d - w) / SPEED * (.75 + .6 * noise(cx * .007, cy * .007, 300)) + R() * .08;
+    if (t < cellT[i]) cellT[i] = t;
+  }
+  queue = [];
+  for (let i = 0; i < cellT.length; i++) if (!cellDone[i] && cellT[i] < Infinity) queue.push(i);
+  queue.sort((a, b) => cellT[a] - cellT[b]); qi = 0;
+  uploadCells();
+}
+function grassAt(x, y, T, settle = .6) {
+  const gx = Math.floor(x / CELL), gy = Math.floor(y / CELL);
+  if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) return false;
+  return T - cellT[gy * GW + gx] > settle;
+}
+
+/* ---- the touch field: where a finger has pressed the grass down, as a small grid of springs ---- */
+function brush(x0, y0, x1, y1, str) {
+  const Rr = 44 * S, dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy, len = Math.sqrt(l2);
+  let mx = 0, my = 0;
+  if (len > .5) { mx = dx / len; my = dy / len; }   // screen motion → ground direction
+  const gx0 = Math.max(0, Math.floor((Math.min(x0, x1) - Rr) / FC)), gx1 = Math.min(FW - 1, Math.ceil((Math.max(x0, x1) + Rr) / FC));
+  const gy0 = Math.max(0, Math.floor((Math.min(y0, y1) - Rr) / FC)), gy1 = Math.min(FH - 1, Math.ceil((Math.max(y0, y1) + Rr) / FC));
+  for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) {
+    const cx = gx * FC, cy = gy * FC;
+    const t = l2 > 0 ? Math.min(1, Math.max(0, ((cx - x0) * dx + (cy - y0) * dy) / l2)) : 0;
+    const px = x0 + dx * t, py = y0 + dy * t, ex = cx - px, ey = cy - py, d = Math.hypot(ex, ey);
+    if (d > Rr) continue;
+    const f = (1 - d / Rr) ** 2 * str, rx = d > 0 ? ex / d : 0, ry = d > 0 ? ey / d : 0;
+    const tx = (mx * .9 + rx * .45) * 1.35, ty = (my * .9 + ry * .45) * 1.35, i = (gy * FW + gx) * 2;
+    FD[i] += (tx - FD[i]) * f * .6; FD[i + 1] += (ty - FD[i + 1]) * f * .6;
+    FV[i] *= 1 - f * .5; FV[i + 1] *= 1 - f * .5;
+  }
+  fieldLive = 1;
+}
+// pressed grass rises back on its own: an under-damped spring, so it overshoots a little before it settles
+function stepField(dt) {
+  if (!fieldLive) return;
+  const K = 13, C = 3.4; let e = 0;
+  for (let i = 0; i < FD.length; i++) {
+    FV[i] += (-K * FD[i] - C * FV[i]) * dt; FD[i] += FV[i] * dt;
+    e += Math.abs(FD[i]) + Math.abs(FV[i]);
+  }
+  if (gl) { gl.bindTexture(gl.TEXTURE_2D, texField); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, FW, FH, gl.RG, gl.FLOAT, FD); }
+  if (e < 1e-3) { FD.fill(0); FV.fill(0); fieldLive = 0; }
+}
+function renderGrass(T) {
+  gl.viewport(0, 0, glc.width, glc.height);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texField);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texCells);
+  const windStr = .75 + .5 * noise(T * .09, 4000);              // calm spells and stronger spells
+  const set = p => {
+    gl.useProgram(p); const u = p.u;
+    gl.uniform2f(u.uRes, W, H); gl.uniform1f(u.uTime, T);
+    if (u.uWind) gl.uniform2f(u.uWind, WIND[0], WIND[1]);
+    if (u.uWindStr) gl.uniform1f(u.uWindStr, windStr);
+    if (u.uField) gl.uniform1i(u.uField, 0);
+    gl.uniform1i(u.uCells, 1); gl.uniform2f(u.uGrid, GW, GH); gl.uniform1f(u.uCell, CELL);
+  };
+  gl.disable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  set(progB); gl.bindVertexArray(vaoB); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  set(progG); gl.bindVertexArray(vaoG); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, (SEG + 1) * 2, nGrass);
+  set(progH); gl.bindVertexArray(vaoH); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, nHeads);
+  gl.bindVertexArray(null);
+}
+function updateGrass(T, dt) {
+  while (qi < queue.length && cellT[queue[qi]] <= T) { const i = queue[qi++]; if (!cellDone[i]) { cellDone[i] = 1; doneN++; lastAct = T; } }
+  stepField(dt);
+}
+function drawLawn(T) {
+  if (!gl) return;
+  renderGrass(T);
+  const ctx = drawingContext;
+  ctx.save(); ctx.globalAlpha = wipeT ? 1 - smooth((T - wipeT) / 1.1) : 1; ctx.drawImage(glc, 0, 0, W, H); ctx.restore();
+}
+
+/* ============================================================
+   the cloth: not black — a deep green-grey fabric, hanging in long soft folds,
+   with a fine nap; painted once, then a slow sheen moves across it
+   ============================================================ */
+function paintVelvet(g) {
+  const k = 3, sw = Math.ceil(W / k), sh = Math.ceil(H / k), Hm = new Float32Array(sw * sh);
+  noiseSeed(Math.floor(R() * 1e6));
+  const ca = Math.cos(.32), sa = Math.sin(.32);
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+    const X = x * k, Y = y * k, u = X * ca + Y * sa, v = -X * sa + Y * ca;
+    Hm[y * sw + x] = noise(u * .0042, v * .0009) + noise(u * .011, v * .0024, 7) * .28;   // folds run long, one way
+  }
+  const c = document.createElement('canvas'); c.width = sw; c.height = sh;
+  const cx = c.getContext('2d'), img = cx.createImageData(sw, sh), d = img.data;
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+    const i = y * sw + x, hx = Hm[i + (x < sw - 1 ? 1 : 0)] - Hm[i - (x > 0 ? 1 : 0)], hy = Hm[i + (y < sh - 1 ? sw : 0)] - Hm[i - (y > 0 ? sw : 0)];
+    const shade = Math.max(-1, Math.min(1, (hx * .8 - hy * .6) * 14));                      // light from the upper right
+    const vx = x / sw - .5, vy = y / sh - .45, vig = 1 - Math.min(1, (vx * vx + vy * vy) * 1.5);
+    const L = (.55 + .45 * vig) * (1 + shade * .55) * (.85 + Hm[i] * .3);
+    d[i * 4] = 15 * L; d[i * 4 + 1] = 20 * L; d[i * 4 + 2] = 19 * L; d[i * 4 + 3] = 255;
+  }
+  cx.putImageData(img, 0, 0);
+  const ctx = g.drawingContext; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(c, 0, 0, W, H);
+  // the nap: fine, faint grain
+  g.strokeWeight(1);
+  for (let n = 0; n < W * H / 40; n++) { g.stroke(R() < .5 ? 255 : 0, R() < .5 ? 6 : 10); g.point(R() * W, R() * H); }
+}
+
+/* ============================================================
+   the tear — like dark cloth stretched until it splits:
+   a hairline of light first, a held breath, then it gives and eases open
+   ============================================================ */
+const STEP = 4;
+function newCrack(x, y, t) {
+  const c = { pts: [], drift: 0, dv: 0, len: 0, born: t, ph: [rr(0, 9), rr(0, 9), rr(0, 9), rr(0, 9)] };
+  addPoint(c, x, y, t); cracks.push(c); return c;
+}
+function addPoint(c, x, y, t) {
+  const prev = c.pts[c.pts.length - 1];
+  if (prev) c.len += Math.hypot(x - prev.x, y - prev.y);
+  const s = c.len, P = c.ph, fray = k => 1 + .05 * Math.sin(s * .5 + P[k]) + .05 * Math.sin(s * 1.3 + P[k + 2]) + rr(-.04, .04);
+  c.pts.push({ x, y, t, s, wl: fray(0), wr: fray(1), w: 0, nx: 0, ny: 0, lx: x, ly: y, rx: x, ry: y });
+}
+function extend(c, x, y, t) {
+  const p = c.pts[c.pts.length - 1], dx = x - p.x, dy = y - p.y, d = Math.hypot(dx, dy);
+  if (d < STEP) return;
+  const ux = dx / d, uy = dy / d, nx = -uy, ny = ux, n = Math.floor(d / STEP);
+  for (let k = 1; k <= n; k++) {
+    c.dv = c.dv * .9 + gauss() * .18; c.drift = c.drift * .97 + c.dv;    // cloth tears in smooth, slightly wandering lines
+    addPoint(c, p.x + ux * STEP * k + nx * c.drift, p.y + uy * STEP * k + ny * c.drift, t);
+    const q = c.pts[c.pts.length - 1];
+    if (R() < .18) spawnLater(q.x, q.y, nx, ny, t + rr(.35, .9));      // they can't wait: out as soon as the cloth gives
+  }
+}
+function widthAt(c, i, T) {
+  const p = c.pts[i], age = T - p.t;
+  if (age <= 0) return -1;
+  let w = .5;                                                            // a hairline of light, held for a breath
+  const a = age - .25;
+  if (a > 0) {
+    const e = Math.max(0, 1 - Math.exp(-1.9 * a) * Math.cos(2.6 * a));  // then it gives: eases open, overshoots a little, settles
+    const Wmax = Math.min(30, 6 + c.len * .055);
+    const u = Math.min(1, Math.max(0, p.s / Math.max(1, c.len)));
+    w = Math.max(w, Wmax * Math.pow(Math.sin(Math.PI * u), .8) * e);    // lens-shaped: widest in the middle
+    w *= 1 + .045 * Math.sin(T * 1.15 + c.ph[0]) * Math.min(1, a);      // and breathes while it stays open
+  }
+  if (healT) w *= 1 - smooth((T - healT) / 1.1);
+  if (c.endT && !c.keep) w *= 1 - smooth((T - c.endT - 2.9) / 1.1);    // closes slowly, gone 4 s after the finger lifts (unless grass took it)
+  return w;
+}
+function geometry(T) {
+  const out = [];
+  for (const c of cracks) {
+    const P = c.pts, N = P.length; if (N < 2) continue;
+    const L = [], Rt = [], seam = [];
+    for (let i = 0; i < N; i++) {
+      const w = widthAt(c, i, T); if (w < 0) break;
+      const a = P[Math.max(0, i - 2)], b = P[Math.min(N - 1, i + 2)];
+      let tx = b.x - a.x, ty = b.y - a.y; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const q = P[i], wl = w * q.wl, wr = w * q.wr;
+      q.lx = q.x - ty * wl; q.ly = q.y + tx * wl; q.rx = q.x + ty * wr; q.ry = q.y - tx * wr;
+      q.nx = -ty; q.ny = tx; q.w = w;
+      L.push([q.lx, q.ly]); Rt.push([q.rx, q.ry]); seam.push(q);
+    }
+    if (seam.length < 2) continue;
+    const maxW = seam.reduce((m, p) => Math.max(m, p.w), 0);
+    if (!c.openT && maxW > 3) c.openT = T;
+    out.push({ c, poly: L.concat(Rt.reverse()), seam, n: seam.length, open: maxW > .3 });
+  }
+  return out;
+}
+
+/* ============================================================
+   butterflies — side view after the reference, wings raised, yellow and glowing
+   ============================================================ */
+function spawnLater(x, y, nx, ny, at) { if (pending.length + flies.length < 360) pending.push({ x, y, nx, ny, at }); }
+function spawnFly(x, y, nx, ny) {
+  // bursting out: a fast first dash away from the crack, before the usual erratic flight takes over
+  const side = R() < .5 ? 1 : -1, sp = rr(220, 340), up = rr(90, 160);
+  const f = { x, y, vx: nx * side * sp, vy: ny * side * sp - up, ph: R() * TWO_PI, fs: rr(20, 26),
+              size: rr(13, 21), life: rr(1.8, 2.4), age: 0, wn: R() * 100, face: 1, cruise: sp, head: Math.atan2(ny * side * sp - up, nx * side * sp), next: rr(.18, .35) };
+  flies.push(f);
+}
+function wings(s, f, a) {
+  push(); scale(s, s * f); noStroke();
+  const g = drawingContext.createLinearGradient(0, 0, .5, -1.5);
+  g.addColorStop(0, `rgba(255,249,204,${a})`); g.addColorStop(.5, `rgba(255,243,170,${a})`); g.addColorStop(1, `rgba(253,236,150,${a})`);   // all goose-yellow
+  drawingContext.fillStyle = g;
+  beginShape(); vertex(-.16, 0); vertex(-.34, -.78); quadraticVertex(-.43, -1.36, -.31, -1.58); quadraticVertex(.2, -1.02, .64, -.46); quadraticVertex(.36, -.14, .16, 0); endShape(CLOSE);
+  beginShape(); vertex(.04, -.04); quadraticVertex(.34, -.78, .86, -.97); quadraticVertex(1.26, -.98, 1.2, -.62); vertex(1.3, -.47); quadraticVertex(1.06, -.1, .46, .03); endShape(CLOSE);
+  pop();
+}
+function drawFly(f) {
+  const k = f.age < .2 ? f.age / .2 : f.age > f.life - .8 ? Math.max(0, (f.life - f.age) / .8) : 1;   // fades out over its last moment
+  const lum = k;
+  const c = Math.cos(f.ph), up = c > 0 ? c : c * .4, s = f.size;
+  if (Math.abs(f.vx) > 6) f.face += ((f.vx > 0 ? -1 : 1) - f.face) * .08;
+  const fl = f.face < 0 ? -1 : 1, ctx = drawingContext;
+  push(); translate(f.x, f.y);
+  // a faint glow: a small soft halo of the same goose-yellow, breathing a little with the wingbeat
+  blendMode(SCREEN); noStroke();
+  const hr = s * (1.6 + .15 * up);
+  const gr = ctx.createRadialGradient(0, -s * .45, 0, 0, -s * .45, hr);
+  gr.addColorStop(0, `rgba(255,244,170,${.22 * lum})`); gr.addColorStop(1, 'rgba(255,244,170,0)');
+  ctx.fillStyle = gr; ctx.fillRect(-hr, -s * .45 - hr, hr * 2, hr * 2);
+  blendMode(BLEND);
+  scale(fl, 1); rotate(constrain(f.vy / 140, -.5, .5) * fl - .12);
+  ctx.shadowColor = `rgba(255,240,160,${.7 * lum})`;
+  ctx.shadowBlur = 5; wings(s, Math.max(-.4, up * .92), .8 * lum);
+  ctx.shadowBlur = 2; stroke(250, 234, 150, 255 * lum); strokeWeight(Math.max(1, s * .1)); line(-.55 * s, .02 * s, .62 * s, .06 * s);
+  ctx.shadowBlur = 6; wings(s, up, lum);
+  pop();
+  ctx.shadowBlur = 0;
+}
+
+/* ============================================================
+   input
+   ============================================================ */
+const hint = document.getElementById('hint'), heal = document.getElementById('heal');
+const ptr = { x: .5, y: .5, sx: .5, sy: .5, cx: 0, cy: 0, lx: -1, ly: -1 };
+let pressing = false, brushMode = false;
+addEventListener('pointerdown', e => {
+  if (e.target instanceof Node && heal.contains(e.target)) return;     // the glass wraps the label in its own layers, so the target may be a child
+  pressing = true; ptr.cx = ptr.lx = e.clientX; ptr.cy = ptr.ly = e.clientY;
+  hint.classList.add('gone'); heal.classList.add('on');
+  // where the grass has already grown, a finger brushes it instead of tearing the cloth
+  brushMode = grassAt(e.clientX, e.clientY, now());
+  if (brushMode) return;
+  healT = 0; pressT = now(); cur = newCrack(e.clientX, e.clientY, now());
+});
+addEventListener("pointermove", e => {
+  ptr.cx = e.clientX; ptr.cy = e.clientY; ptr.x = e.clientX / innerWidth; ptr.y = e.clientY / innerHeight;
+  if (cur) extend(cur, e.clientX, e.clientY, now());
+  // the grass bends wherever the finger passes (a mouse hovering bends it gently too)
+  if (ptr.lx >= 0 && (pressing || e.pointerType === 'mouse')) brush(ptr.lx, ptr.ly, e.clientX, e.clientY, pressing ? 1 : .45);
+  ptr.lx = e.clientX; ptr.ly = e.clientY;
+});
+const end = () => {
+  pressing = false; brushMode = false;
+  if (!cur) return;
+  const c = cur, T = now(); cur = null; c.done = true; c.endT = T;
+  if (c.pts.length < 5) { cracks.splice(cracks.indexOf(c), 1); return; }
+  c.keep = true; seedGrass(c, T);
+  const n = Math.min(18, 6 + Math.floor(c.len / 40));
+  for (let i = 0; i < n; i++) { const p = c.pts[Math.floor(R() * c.pts.length)]; spawnLater(p.x, p.y, rr(-1, 1), rr(-1, 0), Math.max(T, p.t) + rr(.3, 1)); }
+};
+addEventListener('pointerup', end); addEventListener('pointercancel', end);
+heal.addEventListener('click', () => { healT = now(); wipeT = now(); setTimeout(() => { cracks.length = 0; healT = 0; resetGrass(); heal.classList.remove('on'); hint.classList.remove('gone'); }, 1300); });
+
+/* ---- music: starts on the first touch, fading in ----
+   tried on several events because iOS only counts touchend/click as a gesture that may start audio;
+   capture phase, so the cards' stopPropagation can't swallow it */
+const bgm = document.getElementById('bgm'), BGM_EVENTS = ['pointerdown', 'touchend', 'click', 'keydown'];
+function startBgm() {
+  if (!bgm.paused) return;
+  bgm.volume = 0;
+  bgm.play().then(() => {
+    BGM_EVENTS.forEach(t => removeEventListener(t, startBgm, true));
+    const t0 = performance.now(), step = () => { const k = Math.min(1, (performance.now() - t0) / 2500); bgm.volume = .8 * k; if (k < 1) requestAnimationFrame(step); };
+    step();
+  }).catch(() => {});
+}
+BGM_EVENTS.forEach(t => addEventListener(t, startBgm, true));
+
+/* ---- the meadow cards ---- */
+const moCardsBox = document.getElementById('mo-cards');
+const moCards = [...document.querySelectorAll('.mo-card')];
+let profileShown = false;
+// touching a card must not tear the cloth or comb the grass
+moCardsBox.addEventListener('pointerdown', e => e.stopPropagation());
+function showCards(on) {
+  nav.classList.toggle('on', on); nav.setAttribute('aria-hidden', String(!on));
+  if (on) setPage(0, 1);
+  else if (page >= 0) { leavePage(pages[page], 1); page = -1; }
+}
+
+/* ---- pages: one glass at a time ---- */
+const pages = [...document.querySelectorAll('.mo-page')];
+pages.slice(0, -1).forEach(p => p.insertAdjacentHTML('beforeend', '<div class="mo-more" aria-hidden="true">下滑 继续</div>'));
+const nav = document.getElementById('mo-nav'), navTrack = nav.querySelector('.nav-track');
+const navBtns = [...nav.querySelectorAll('button')], navInk = nav.querySelector('.nav-ink');
+let page = -1, flipT = 0;
+const cardsOf = p => [...p.querySelectorAll('.mo-card')];
+const atTop = p => p.scrollTop <= 1, atBottom = p => p.scrollTop + p.clientHeight >= p.scrollHeight - 1;
+
+function setPage(i, dir) {
+  if (i < 0 || i >= pages.length || i === page) return;
+  const prev = page; page = i; flipT = performance.now();
+  dir = dir ?? Math.sign(i - prev);
+  if (prev >= 0) leavePage(pages[prev], dir);
+  enterPage(pages[i], dir, prev < 0 ? 0 : .32);    // the old glass is mostly gone before the new one arrives
+  navBtns.forEach((b, k) => k === i ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
+  moveInk();
+}
+function leavePage(p, dir) {
+  p.classList.remove('on');
+  cardsOf(p).forEach(el => {
+    el.style.transitionDelay = '0s'; el.classList.toggle('up', dir > 0); el.classList.remove('show');
+    el.setAttribute('aria-hidden', 'true'); if (el.tagName === 'A') el.tabIndex = -1;
+  });
+  rvEls.forEach(el => { if (p.contains(el)) { el.style.setProperty('--d', '0s'); el.classList.remove('in'); } });}
+function enterPage(p, dir, delay) {
+  p.classList.add('on');
+  p.scrollTop = dir < 0 ? p.scrollHeight : 0;      // coming back up lands at the bottom of the previous page
+  const cs = cardsOf(p);
+  cs.forEach((el, k) => {
+    el.style.transition = 'none'; el.classList.toggle('up', dir < 0); el.offsetHeight; el.style.transition = '';
+    el.classList.remove('up');
+    el.style.transitionDelay = (delay + k * .08).toFixed(2) + 's';
+    el.classList.add('show'); el.setAttribute('aria-hidden', 'false'); if (el.tagName === 'A') el.tabIndex = 0;
+  });
+  // the delay only for the entrance; afterwards the glass should lean toward the pointer without lag
+  clearTimeout(enterPage.t); enterPage.t = setTimeout(() => cs.forEach(el => el.style.transitionDelay = ''), 1600);
+  requestAnimationFrame(() => revealIn(rvEls.filter(el => p.contains(el) && rvSeen.has(el)), delay + .25));
+}
+function moveInk() {
+  const b = navBtns[page]; if (!b) return;
+  navInk.style.width = b.offsetWidth + 'px'; navInk.style.transform = `translateX(${b.offsetLeft}px)`;
+  navTrack.scrollTo({ left: b.offsetLeft - (navTrack.clientWidth - b.offsetWidth) / 2, behavior: 'smooth' });
+}
+addEventListener('resize', moveInk);
+navBtns.forEach((b, k) => b.addEventListener('click', () => setPage(k)));
+nav.addEventListener('pointerdown', e => e.stopPropagation());
+
+// swipe: only from the edge of a page — at its bottom a swipe up goes on, at its top a swipe down goes back
+let sw = null;
+addEventListener('touchstart', e => {
+  sw = null;
+  if (!profileShown || page < 0 || e.touches.length > 1 || nav.contains(e.target)) return;
+  const p = pages[page], t = e.touches[0];
+  sw = { p, x: t.clientX, y: t.clientY, t: performance.now(), top: atTop(p), bot: atBottom(p), dy: 0, dx: 0 };
+}, { passive: true });
+addEventListener('touchmove', e => {
+  if (!sw) return;
+  const t = e.touches[0]; sw.dx = t.clientX - sw.x; sw.dy = t.clientY - sw.y;
+  const edge = (sw.dy < 0 && sw.bot) || (sw.dy > 0 && sw.top);
+  const pull = edge && Math.abs(sw.dy) > Math.abs(sw.dx) ? Math.sign(sw.dy) * Math.min(70, Math.abs(sw.dy) * .3) : 0;
+  sw.p.style.transition = 'none'; sw.p.style.transform = pull ? `translateY(${pull}px)` : '';    // a little rubber band
+}, { passive: true });
+const swEnd = () => {
+  if (!sw) return;
+  const { p, dx, dy, t } = sw; sw = null;
+  p.style.transition = 'transform .45s cubic-bezier(.2,.7,.2,1), visibility 0s linear 1s'; p.style.transform = '';
+  setTimeout(() => { if (!sw) p.style.transition = ''; }, 500);
+  const ady = Math.abs(dy), quick = performance.now() - t < 320;
+  if (ady < Math.abs(dx) * 1.3 || ady < (quick ? 40 : 70)) return;
+  if (dy < 0 && atBottom(p)) setPage(page + 1, 1);
+  else if (dy > 0 && atTop(p)) setPage(page - 1, -1);
+};
+addEventListener('touchend', swEnd); addEventListener('touchcancel', () => { if (sw) { sw.dy = 0; swEnd(); } });
+
+// mouse wheel / trackpad: the same rule, one page per gesture
+let wg = null, wLast = 0;
+addEventListener('wheel', e => {
+  if (!profileShown || page < 0) return;
+  const t = performance.now(), p = pages[page];
+  if (t - wLast > 220) wg = { top: atTop(p), bot: atBottom(p), acc: 0 };
+  wLast = t;
+  if (!wg || wg.dead) return;
+  wg.acc += e.deltaY;
+  if (wg.acc > 50 && wg.bot) { wg.dead = true; setPage(page + 1, 1); }
+  else if (wg.acc < -50 && wg.top) { wg.dead = true; setPage(page - 1, -1); }
+}, { passive: true });
+
+/* ---- content reveal ---- */
+const rvEls = [...document.querySelectorAll(
+  '.mop-inner > :not(.mop-tags), .mop-tags > *, .ab-sec > :not(.ab-tl), .ab-tl-i, .ab-gate')];
+rvEls.forEach(el => el.classList.add('rv'));
+const rvSeen = new Set();
+function revealIn(list, base) {
+  list.filter(el => !el.classList.contains('in'))
+      .forEach((el, i) => { el.style.setProperty('--d', (base + Math.min(i, 14) * .07).toFixed(2) + 's'); el.classList.add('in'); });
+}
+const rvIO = new IntersectionObserver(entries => {
+  const fresh = [];
+  for (const e of entries) { if (e.isIntersecting) { rvSeen.add(e.target); fresh.push(e.target); } else rvSeen.delete(e.target); }
+  const p = pages[page];
+  if (profileShown && p) revealIn(rvEls.filter(el => fresh.includes(el) && p.contains(el)), performance.now() - flipT < 800 ? .5 : 0);
+}, { rootMargin: '0px 0px -6% 0px' });
+rvEls.forEach(el => rvIO.observe(el));
+moCards.forEach(el => { if (el.tagName === 'A') el.tabIndex = -1; });
+
+
+const wander = t => Math.sin(t * 1.3) * .6 + Math.sin(t * .47 + 1.7) * .4;
+
+/* ============================================================
+   draw
+   ============================================================ */
+function draw() {
+  const T = now(), dt = Math.min(.05, deltaTime / 1000);
+  ptr.sx += (ptr.x - ptr.sx) * dt * 2; ptr.sy += (ptr.y - ptr.sy) * dt * 2;
+
+  // once the grass has carpeted everything, the cloth and paper underneath can't be seen: skip them
+  const covered = doneN === GW * GH && T - lastAct > 1 && !wipeT;
+  if (covered !== profileShown) { profileShown = covered; showCards(covered); }
+  updateGrass(T, dt);
+  if (pressing && brushMode) brush(ptr.cx, ptr.cy, ptr.cx, ptr.cy, .12);   // a finger held still keeps the grass parted around it
+  for (let i = cracks.length - 1; i >= 0; i--) if (cracks[i].endT && !cracks[i].keep && T - cracks[i].endT > 4) cracks.splice(i, 1);
+  if (!cracks.length && !cur && heal.classList.contains('on')) heal.classList.remove('on');
+  const G = geometry(T);
+  const ctx = drawingContext;
+  let gr;
+
+  if (!covered) {
+  // the paper behind drifts with the finger and slowly breathes nearer and farther; a soft warm light rests on it
+  const ox = PAD + (ptr.sx - .5) * PAD * 1.2 + Math.sin(T * .1) * PAD * .25, oy = PAD + (ptr.sy - .5) * PAD * .9 + Math.cos(T * .08) * PAD * .2;
+  const wc = world.drawingContext, zx = W * .5, zy = H * .35, z = 1.012 + .012 * Math.sin(T * .32);
+  wc.save(); wc.translate(zx, zy); wc.scale(z, z); wc.translate(-zx, -zy);
+  wc.drawImage(scene.elt, -ox, -oy, scene.width, scene.height);
+  wc.restore();
+  const D = Math.hypot(W, H);
+  gr = wc.createRadialGradient(zx, H * .3, 0, zx, H * .3, D * .55);
+  gr.addColorStop(0, `rgba(255,253,245,${.22 + .08 * Math.sin(T * .55)})`); gr.addColorStop(1, 'rgba(255,253,245,0)');
+  wc.fillStyle = gr; wc.fillRect(0, 0, W, H);
+  image(world, 0, 0);
+
+  // the cloth, a slow sheen sliding across its folds, with the tear cut out of it
+  const xc = dark.drawingContext;
+  dark.clear(); dark.image(velvet, 0, 0);
+  xc.save(); xc.globalCompositeOperation = 'screen';
+  const sp = ((T * .025) % 1.6 - .3), sx0 = W * sp, sy0 = H * (sp - .2);
+  gr = xc.createLinearGradient(sx0 - W * .35, sy0 - H * .1, sx0 + W * .35, sy0 + H * .1);
+  gr.addColorStop(0, 'rgba(70,90,82,0)'); gr.addColorStop(.5, 'rgba(70,90,82,.06)'); gr.addColorStop(1, 'rgba(70,90,82,0)');
+  xc.fillStyle = gr; xc.fillRect(0, 0, W, H);
+  xc.fillStyle = `rgba(40,52,48,${.03 + .02 * Math.sin(T * .7)})`; xc.fillRect(0, 0, W, H);   // the whole cloth breathes, barely
+  xc.restore();
+  dark.erase(); dark.noStroke();
+  for (const g of G) if (g.open) { dark.beginShape(); for (const p of g.poly) dark.vertex(p[0], p[1]); dark.endShape(CLOSE); }
+  dark.noErase();
+  // depth: the paper sits a little way behind the cloth, so it falls into shade just inside the opening
+  xc.save();
+  for (const g of G) if (g.open && g.seam.some(p => p.w > 2)) {
+    const path = new Path2D(); g.poly.forEach(([x, y], i) => i ? path.lineTo(x, y) : path.moveTo(x, y)); path.closePath();
+    const hole = new Path2D(); hole.rect(-50, -50, W + 100, H + 100); hole.addPath(path);
+    xc.save(); xc.clip(path);
+    xc.shadowColor = 'rgba(0,0,0,.55)'; xc.shadowBlur = 9 * pixelDensity(); xc.fillStyle = '#000'; xc.fill(hole, 'evenodd');
+    xc.restore();
+  }
+  xc.restore();
+  image(dark, 0, 0);
+
+  // anticipation: while the finger presses, light faintly shows through the thin cloth beneath it
+  if (cur) {
+    const k = smooth((T - pressT) / .5) * .1;
+    ctx.save(); ctx.globalCompositeOperation = 'screen';
+    gr = ctx.createRadialGradient(ptr.cx, ptr.cy, 0, ptr.cx, ptr.cy, 110);
+    gr.addColorStop(0, `rgba(240,232,210,${k})`); gr.addColorStop(1, 'rgba(240,232,210,0)');
+    ctx.fillStyle = gr; ctx.fillRect(ptr.cx - 110, ptr.cy - 110, 220, 220); ctx.restore();
+  }
+
+  // light spill: the paper behind leaks onto the cloth around the opening, in its own colour;
+  // it swells as the cloth gives way, breathes while open, and lingers a moment after it closes
+  const sc = spill.getContext('2d'), anyOpen = G.some(g => g.open);
+  if (anyOpen) {
+    sc.setTransform(1, 0, 0, 1, 0, 0); sc.globalCompositeOperation = 'source-over'; sc.clearRect(0, 0, spill.width, spill.height);
+    sc.setTransform(1 / SPILL, 0, 0, 1 / SPILL, 0, 0);
+    sc.shadowColor = 'rgba(255,255,255,.9)'; sc.shadowBlur = 12; sc.fillStyle = '#fff';
+    for (let pass = 0; pass < 2; pass++) for (const g of G) if (g.open) { sc.beginPath(); g.poly.forEach(([x, y], i) => i ? sc.lineTo(x, y) : sc.moveTo(x, y)); sc.closePath(); sc.fill(); }
+    sc.shadowBlur = 0; sc.globalCompositeOperation = 'source-in';
+    sc.drawImage(world.elt, 0, 0, W, H);                                 // tint the glow with what is behind it
+    spillLevel = Math.min(1, spillLevel + dt * 3);
+  } else spillLevel = Math.max(0, spillLevel - dt / 1.2);
+  if (spillLevel > 0) {
+    let burst = 0;
+    for (const c of cracks) if (c.openT) { const s = T - c.openT; burst = Math.max(burst, .35 * Math.exp(-s * 1.4) * (1 - Math.exp(-s * 8))); }
+    ctx.save(); ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = Math.min(1, spillLevel * (.4 + .08 * Math.sin(T * 1.15)) + burst);
+    ctx.drawImage(spill, 0, 0, spill.width * SPILL, spill.height * SPILL); ctx.restore();
+  }
+  } else background(70, 112, 20);
+
+  // the grass, over everything except the butterflies
+  if (doneN) drawLawn(T);
+
+  for (let i = pending.length - 1; i >= 0; i--) if (T >= pending[i].at) { const p = pending[i]; pending.splice(i, 1); if (!healT) spawnFly(p.x, p.y, p.nx, p.ny); }
+
+  // butterflies
+  for (let i = flies.length - 1; i >= 0; i--) {
+    const f = flies[i]; f.age += dt;
+    if (f.age > f.life) { flies.splice(i, 1); continue; }
+    // erratic: every few tenths of a second it lurches off in a new direction
+    if (f.age > f.next) { f.head += rr(-2.2, 2.2); f.cruise = rr(140, 230); f.next = f.age + rr(.12, .35); }
+    f.vx += (Math.cos(f.head) * f.cruise - f.vx) * Math.min(1, dt * 7); f.vy += (Math.sin(f.head) * f.cruise - f.vy) * Math.min(1, dt * 7);
+    f.x += f.vx * dt; f.y += f.vy * dt + Math.cos(f.ph) * f.size * .9 * dt * f.fs * .1; f.ph += dt * f.fs;   // each wingbeat lifts it a little
+    drawFly(f);
+  }
+}
+</script>
+</body>
+</html>
