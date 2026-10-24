@@ -594,7 +594,7 @@ function compile(vs, fs) {
 }
 function initGL() {
   glc = document.createElement('canvas');
-  gl = glc.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, preserveDrawingBuffer: true });
+  gl = glc.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, preserveDrawingBuffer: false });   // copied out right after rendering, in the same frame
   if (!gl) { console.warn('WebGL2 unavailable — no grass'); return; }
   progG = compile(VS_GRASS, FS_GRASS); progH = compile(VS_HEAD, FS_HEAD); progB = compile(VS_GROUND, FS_GROUND);
   const strip = []; for (let i = 0; i <= SEG; i++) strip.push(i / SEG, -1, i / SEG, 1);
@@ -934,6 +934,14 @@ function startBgm() {
 }
 BGM_EVENTS.forEach(t => addEventListener(t, startBgm, true));
 
+/* ---- phones: lighter glass ----
+   the big cards' rim refraction (three SVG displacement passes over a live backdrop) is the heaviest thing on a phone;
+   there they keep the frosted blur and rim light, and only the small glasses (nav, links, button) still bend */
+const COARSE = matchMedia('(pointer: coarse)').matches;
+let curFps = 60;
+if (COARSE) addEventListener('DOMContentLoaded', () =>
+  document.querySelectorAll('div.mo-card').forEach(el => el._liquidGlass && el._liquidGlass.set({ refraction: 0 })));
+
 /* ---- the meadow cards ---- */
 const moCardsBox = document.getElementById('mo-cards');
 const moCards = [...document.querySelectorAll('.mo-card')];
@@ -1064,6 +1072,9 @@ function draw() {
 
   // once the grass has carpeted everything, the cloth and paper underneath can't be seen: skip them
   const covered = doneN === GW * GH && T - lastAct > 1 && !wipeT;
+  // on phones, while the glass pages are up, every frame of grass also re-renders the glass over it: 30 fps is plenty there
+  const fps = covered && COARSE ? 30 : 60;
+  if (fps !== curFps) { curFps = fps; frameRate(fps); }
   if (covered !== profileShown) { profileShown = covered; showCards(covered); }
   updateGrass(T, dt);
   if (pressing && brushMode) brush(ptr.cx, ptr.cy, ptr.cx, ptr.cy, .12);   // a finger held still keeps the grass parted around it
