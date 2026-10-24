@@ -935,12 +935,17 @@ function startBgm() {
 BGM_EVENTS.forEach(t => addEventListener(t, startBgm, true));
 
 /* ---- phones: lighter glass ----
-   the big cards' rim refraction (three SVG displacement passes over a live backdrop) is the heaviest thing on a phone;
-   there they keep the frosted blur and rim light, and only the small glasses (nav, links, button) still bend */
+   each glass follows the pointer: on every move all of them re-measure and repaint, and the backdrop filters re-run —
+   measured on an emulated phone that halves the frame rate while a finger moves. a finger can't hover, so the lean
+   is barely visible on touch: drop it there. the big cards also skip the rim refraction (SVG displacement passes) */
 const COARSE = matchMedia('(pointer: coarse)').matches;
 let curFps = 60;
 if (COARSE) addEventListener('DOMContentLoaded', () =>
-  document.querySelectorAll('div.mo-card').forEach(el => el._liquidGlass && el._liquidGlass.set({ refraction: 0 })));
+  document.querySelectorAll('.lg-root').forEach(el => {
+    const g = el._liquidGlass; if (!g) return;
+    removeEventListener('pointermove', g._onMove);
+    if (el.matches('div.mo-card')) g.set({ refraction: 0 });
+  }));
 
 /* ---- the meadow cards ---- */
 const moCardsBox = document.getElementById('mo-cards');
